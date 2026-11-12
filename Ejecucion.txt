@@ -1,0 +1,23 @@
+Primera terminal:
+
+venv\Scripts\activate
+
+waitress-serve --listen=0.0.0.0:8080 app:app
+
+Segunda terminal:
+
+(Al reiniciar el dispositivo)
+
+Comprobar Tailscale:
+
+& "C:\Program Files\Tailscale\tailscale.exe" status
+
+Comprobar Funnel:
+
+& "C:\Program Files\Tailscale\tailscale.exe" funnel status
+
+Si Funnel ON: No hacer nada
+
+Si Funnel OFF:
+
+& "C:\Program Files\Tailscale\tailscale.exe" funnel --bg http://127.0.0.1:8080
