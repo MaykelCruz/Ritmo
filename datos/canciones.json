@@ -4,174 +4,279 @@
     "titulo": "De música ligera",
     "artista": "Soda Stereo",
     "genero": "Rock",
-    "duracion": 211
+    "duracion": 211,
+    "artistas": [
+      "Soda Stereo"
+    ]
   },
   {
     "id": 2,
     "titulo": "Persiana americana",
     "artista": "Soda Stereo",
     "genero": "Rock",
-    "duracion": 296
+    "duracion": 296,
+    "artistas": [
+      "Soda Stereo"
+    ]
   },
   {
     "id": 3,
     "titulo": "Crimen",
     "artista": "Gustavo Cerati",
     "genero": "Rock",
-    "duracion": 271
+    "duracion": 271,
+    "artistas": [
+      "Gustavo Cerati"
+    ]
   },
   {
     "id": 4,
     "titulo": "Puente",
     "artista": "Gustavo Cerati",
     "genero": "Rock",
-    "duracion": 236
+    "duracion": 236,
+    "artistas": [
+      "Gustavo Cerati"
+    ]
   },
   {
     "id": 5,
     "titulo": "Afuera",
     "artista": "Caifanes",
     "genero": "Rock",
-    "duracion": 313
+    "duracion": 313,
+    "artistas": [
+      "Caifanes"
+    ]
   },
   {
     "id": 6,
     "titulo": "La célula que explota",
     "artista": "Caifanes",
     "genero": "Rock",
-    "duracion": 290
+    "duracion": 290,
+    "artistas": [
+      "Caifanes"
+    ]
   },
   {
     "id": 7,
     "titulo": "Rayando el sol",
     "artista": "Maná",
     "genero": "Rock",
-    "duracion": 258
+    "duracion": 258,
+    "artistas": [
+      "Maná"
+    ]
   },
   {
     "id": 8,
     "titulo": "Clavado en un bar",
     "artista": "Maná",
     "genero": "Rock",
-    "duracion": 249
+    "duracion": 249,
+    "artistas": [
+      "Maná"
+    ]
   },
   {
     "id": 9,
     "titulo": "Lamento boliviano",
     "artista": "Enanitos Verdes",
     "genero": "Rock",
-    "duracion": 229
+    "duracion": 229,
+    "artistas": [
+      "Enanitos Verdes"
+    ]
   },
   {
     "id": 10,
     "titulo": "La camisa negra",
     "artista": "Juanes",
     "genero": "Pop",
-    "duracion": 212
+    "duracion": 212,
+    "artistas": [
+      "Juanes"
+    ]
   },
   {
     "id": 11,
     "titulo": "A Dios le pido",
     "artista": "Juanes",
     "genero": "Pop",
-    "duracion": 202
+    "duracion": 202,
+    "artistas": [
+      "Juanes"
+    ]
   },
   {
     "id": 12,
     "titulo": "La tortura",
     "artista": "Shakira",
     "genero": "Pop",
-    "duracion": 212
+    "duracion": 212,
+    "artistas": [
+      "Shakira"
+    ]
   },
   {
     "id": 13,
     "titulo": "La bicicleta",
     "artista": "Carlos Vives",
     "genero": "Pop",
-    "duracion": 217
+    "duracion": 217,
+    "artistas": [
+      "Carlos Vives"
+    ]
   },
   {
     "id": 14,
     "titulo": "La gota fría",
     "artista": "Carlos Vives",
     "genero": "Folclor",
-    "duracion": 241
+    "duracion": 241,
+    "artistas": [
+      "Carlos Vives"
+    ]
   },
   {
     "id": 15,
     "titulo": "Yo no sé mañana",
     "artista": "Luis Enrique",
     "genero": "Salsa",
-    "duracion": 292
+    "duracion": 292,
+    "artistas": [
+      "Luis Enrique"
+    ]
   },
   {
     "id": 16,
     "titulo": "Así es la vida",
     "artista": "Luis Enrique",
     "genero": "Salsa",
-    "duracion": 274
+    "duracion": 274,
+    "artistas": [
+      "Luis Enrique"
+    ]
   },
   {
     "id": 17,
     "titulo": "Quincho Barrilete",
     "artista": "Carlos Mejía Godoy",
     "genero": "Folclor",
-    "duracion": 190
+    "duracion": 190,
+    "artistas": [
+      "Carlos Mejía Godoy"
+    ]
   },
   {
     "id": 18,
     "titulo": "Nicaragua, Nicaragüita",
     "artista": "Carlos Mejía Godoy",
     "genero": "Folclor",
-    "duracion": 180
+    "duracion": 180,
+    "artistas": [
+      "Carlos Mejía Godoy"
+    ]
   },
   {
     "id": 19,
     "titulo": "Pedro Navaja",
     "artista": "Rubén Blades",
     "genero": "Salsa",
-    "duracion": 440
+    "duracion": 440,
+    "artistas": [
+      "Rubén Blades"
+    ]
   },
   {
     "id": 20,
     "titulo": "Pablo Pueblo",
     "artista": "Rubén Blades",
     "genero": "Salsa",
-    "duracion": 297
+    "duracion": 297,
+    "artistas": [
+      "Rubén Blades"
+    ]
   },
   {
     "id": 21,
     "titulo": "La vida es un carnaval",
     "artista": "Celia Cruz",
     "genero": "Salsa",
-    "duracion": 279
+    "duracion": 279,
+    "artistas": [
+      "Celia Cruz"
+    ]
   },
   {
     "id": 22,
     "titulo": "Gasolina",
     "artista": "Daddy Yankee",
     "genero": "Reggaetón",
-    "duracion": 192
+    "duracion": 192,
+    "artistas": [
+      "Daddy Yankee"
+    ]
   },
   {
     "id": 23,
     "titulo": "Dale Don Dale",
     "artista": "Don Omar",
     "genero": "Reggaetón",
-    "duracion": 227
+    "duracion": 227,
+    "artistas": [
+      "Don Omar"
+    ]
   },
   {
     "id": 24,
     "titulo": "Tití me preguntó",
     "artista": "Bad Bunny",
     "genero": "Reggaetón",
-    "duracion": 243
+    "duracion": 243,
+    "artistas": [
+      "Bad Bunny"
+    ]
   },
   {
     "id": 25,
     "titulo": "Vivir mi vida",
     "artista": "Marc Anthony",
     "genero": "Salsa",
-    "duracion": 255
+    "duracion": 255,
+    "artistas": [
+      "Marc Anthony"
+    ]
+  },
+  {
+    "id": 26,
+    "titulo": "La cobra",
+    "artista": "El nine",
+    "genero": "Otro",
+    "duracion": 167,
+    "artistas": [
+      "El nine"
+    ]
+  },
+  {
+    "id": 27,
+    "titulo": "Una Cerveza",
+    "artista": "Fuerza Regida",
+    "genero": "Regional mexicano",
+    "duracion": 276,
+    "artistas": [
+      "Fuerza Regida"
+    ]
+  },
+  {
+    "id": 28,
+    "titulo": "Mil Horas",
+    "artista": "Los Abuelos De La Nada",
+    "artistas": [
+      "Los Abuelos De La Nada"
+    ],
+    "genero": "Rock",
+    "duracion": 161
   }
 ]

@@ -11,6 +11,15 @@ const GENEROS = {
   Salsa: ["#ffb72b", "#0e1633"],
   Folclor: ["#0b7f60", "#ffffff"],
   "Reggaetón": ["#6b3ff0", "#ffffff"],
+  Cumbia: ["#c2410c", "#ffffff"],
+  Bachata: ["#9d174d", "#ffffff"],
+  Merengue: ["#0369a1", "#ffffff"],
+  "Regional mexicano": ["#7c2d12", "#ffffff"],
+  Balada: ["#a21caf", "#ffffff"],
+  "Hip hop": ["#334155", "#ffffff"],
+  "Electrónica": ["#22d3ee", "#0e1633"],
+  Jazz: ["#a16207", "#ffffff"],
+  "Clásica": ["#e2e8f0", "#0e1633"],
   Otro: ["#0e1633", "#ffffff"],
 };
 const colorGenero = g => GENEROS[g] || GENEROS.Otro;
@@ -94,7 +103,7 @@ async function api(url, metodoHttp = "GET", cuerpo) {
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) { aviso(d.error || "Algo salió mal"); throw new Error(d.error); }
+  if (!r.ok) { aviso(d.error || "Algo salió mal"); const err = new Error(d.error); err.campos = d.campos; throw err; }
   return d;
 }
 let temporizadorAviso;
@@ -182,87 +191,256 @@ function pintarInicio() {
 }
 
 /* ---------- Biblioteca ---------- */
-/* Sube un archivo: si es imagen es la portada, si no es el audio */
-async function subirArchivo(id, archivo) {
-  const esImagen = archivo.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(archivo.name);
+const EXT_IMAGEN = /\.(jpe?g|png|webp)$/i, EXT_AUDIO = /\.(mp3|ogg|wav|m4a)$/i;
+let editando = null;           // id de la canción que se está editando (null = canción nueva)
+let tocados = new Set();       // campos que la persona ya tocó (solo a esos se les muestra el error)
+let temporizadorValidar;
+let secuenciaValidar = 0;      // numera las consultas: si una respuesta llega tarde, se ignora
+
+/* Revisa un archivo antes de subirlo. Devuelve el mensaje de error, o "" si está bien. */
+function revisarArchivo(archivo, tipo) {
+  const imagen = tipo === "portada";
+  const limiteMb = imagen ? S.limites.portada_mb : S.limites.audio_mb;
+  if (!(imagen ? EXT_IMAGEN : EXT_AUDIO).test(archivo.name)) return imagen ? "Usa una imagen jpg, png o webp." : "Usa un audio mp3, ogg, wav o m4a.";
+  if (archivo.size === 0) return "El archivo está vacío.";
+  if (archivo.size > limiteMb * 1024 * 1024) return `Pesa demasiado (máximo ${limiteMb} MB).`;
+  return "";
+}
+/* Sube el audio o la portada de una canción (el servidor vuelve a validar todo) */
+async function subirArchivo(id, archivo, tipo) {
+  const mensaje = revisarArchivo(archivo, tipo);
+  if (mensaje) { aviso(mensaje); throw new Error(mensaje); }
   const datos = new FormData();
   datos.append("archivo", archivo);
-  const r = await fetch(`/api/canciones/${id}/${esImagen ? "portada" : "audio"}`, { method: "POST", body: datos });
-  if (!r.ok) { const d = await r.json().catch(() => ({})); aviso(d.error || "No se pudo subir el archivo"); throw new Error(d.error); }
-  if (esImagen) versionPortadas = Date.now();
-  return esImagen ? "Portada añadida" : "Audio añadido";
+  const r = await fetch(`/api/canciones/${id}/${tipo}`, { method: "POST", body: datos });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { aviso(d.error || "No se pudo subir el archivo"); throw new Error(d.error); }
+  if (tipo === "portada") versionPortadas = Date.now();
+  return tipo === "portada" ? "Portada guardada" : "Audio guardado";
 }
+/* Abre el selector de archivos del sistema para una canción de la lista */
+function elegirArchivo(selector, id, tipo) {
+  return new Promise(resolver => {
+    const entrada = $(selector);
+    entrada.onchange = async () => {
+      const f = entrada.files[0]; entrada.value = "";
+      if (f) { try { aviso(await subirArchivo(id, f, tipo)); } catch (_) { } }
+      resolver();
+    };
+    entrada.addEventListener("cancel", resolver, { once: true });
+    entrada.click();
+  });
+}
+
+const datosForm = () => ({ titulo: $("#f-titulo").value, artista: $("#f-artista").value, genero: $("#f-genero").value, duracion: $("#f-duracion").value, excluir_id: editando });
+function mostrarError(campo, mensaje) {
+  const p = $(`[data-error="${campo}"]`);
+  if (p) p.textContent = mensaje || "";
+  const entrada = $("#form-cancion").elements[campo];
+  if (entrada) entrada.setAttribute("aria-invalid", mensaje ? "true" : "false");
+}
+function pintarChips(artistas) {
+  $("#chips-art").innerHTML = artistas.length > 1
+    ? `<span class="suave chico">${artistas.length} artistas:</span>` + artistas.map(a => `<span class="chip-art">${esc(a)}</span>`).join("")
+    : "";
+}
+/* Pregunta al servidor si los datos son válidos y los muestra mientras escribes */
+function validarEnVivo({ inmediato = false, todos = false } = {}) {
+  clearTimeout(temporizadorValidar);
+  const ejecutar = async () => {
+    const turno = ++secuenciaValidar;
+    const d = await api("/api/validar", "POST", datosForm());
+    if (turno !== secuenciaValidar) return d;            // llegó otra consulta más nueva: esta ya no vale
+    pintarChips(d.artistas);
+    ["titulo", "artista", "genero", "duracion"].forEach(c => mostrarError(c, todos || tocados.has(c) ? d.errores[c] : ""));
+    return d;
+  };
+  if (inmediato || todos) return ejecutar();
+  temporizadorValidar = setTimeout(ejecutar, 250);
+}
+function abrirForm(c) {
+  editando = c ? c.id : null;
+  tocados = new Set();
+  $("#f-titulo").value = c ? c.titulo : "";
+  $("#f-artista").value = c ? c.artista : "";
+  $("#f-genero").value = c ? c.genero : "Otro";
+  $("#f-duracion").value = c ? fmt(c.duracion) : "";
+  $("#f-portada").value = ""; $("#f-audio").value = "";
+  const vista = $("#vista-portada");
+  if (c && c.portada) { vista.src = urlPortada(c); vista.hidden = false; } else { vista.removeAttribute("src"); vista.hidden = true; }
+  $("#resumen-form").textContent = c ? `Editar «${c.titulo}»` : "Añadir una canción";
+  $("#guardar-form").textContent = c ? "Guardar cambios" : "Guardar canción";
+  $("#nota-archivos").hidden = !c;
+  ["titulo", "artista", "genero", "duracion", "portada", "audio"].forEach(k => mostrarError(k, ""));
+  $("#panel-form").open = true;
+  validarEnVivo({ inmediato: true });
+  $("#panel-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("#f-titulo").focus({ preventScroll: true });
+}
+function cerrarForm() {
+  editando = null; tocados = new Set();
+  abrirFormVacio();
+  $("#panel-form").open = false;
+}
+function abrirFormVacio() {
+  $("#form-cancion").reset();
+  $("#f-genero").value = "Otro";
+  const vista = $("#vista-portada"); vista.removeAttribute("src"); vista.hidden = true;
+  $("#resumen-form").textContent = "Añadir una canción";
+  $("#guardar-form").textContent = "Guardar canción";
+  $("#nota-archivos").hidden = true;
+  pintarChips([]);
+  ["titulo", "artista", "genero", "duracion", "portada", "audio"].forEach(k => mostrarError(k, ""));
+}
+
 function armarBiblioteca() {
+  const L = S.limites;
   $("#biblioteca").innerHTML = `
     <h1 class="titulo-pag">Biblioteca</h1>
     <p class="sub">Busca por título, artista o género y añade lo que quieras a tu cola.</p>
     <div class="herr">
-      <input type="search" id="q" placeholder="Buscar una canción" aria-label="Buscar">
+      <input type="search" id="q" maxlength="100" placeholder="Buscar una canción" aria-label="Buscar">
       <select id="campo" aria-label="Buscar en"><option value="titulo">en título</option><option value="artista">en artista</option><option value="genero">en género</option></select>
       <select id="orden" aria-label="Ordenar por"><option value="titulo">ordenar por título</option><option value="artista">ordenar por artista</option><option value="genero">ordenar por género</option><option value="duracion">ordenar por duración</option></select>
     </div>
-    <details class="nueva"><summary>Añadir una canción</summary>
-      <form id="form-nueva">
-        <input name="titulo" placeholder="Título" required aria-label="Título">
-        <input name="artista" placeholder="Artista" required aria-label="Artista">
-        <input name="genero" placeholder="Género" aria-label="Género">
-        <input name="duracion" placeholder="Duración, ej. 3:45" required aria-label="Duración">
-        <input name="audio" type="file" accept="audio/*,image/*" aria-label="Audio o portada (opcional)" title="Audio o portada (opcional)">
-        <button class="btn">Guardar canción</button>
+    <details class="panel-form" id="panel-form"><summary id="resumen-form">Añadir una canción</summary>
+      <form id="form-cancion" novalidate autocomplete="off">
+        <div class="campo"><label for="f-titulo">Título</label>
+          <input id="f-titulo" name="titulo" maxlength="${L.titulo}" required>
+          <p class="error" data-error="titulo" role="alert"></p></div>
+        <div class="campo"><label for="f-artista">Artistas</label>
+          <input id="f-artista" name="artista" maxlength="${L.artista * L.max_artistas}" required aria-describedby="ayuda-artista">
+          <p class="ayuda" id="ayuda-artista">Si son varios, sepáralos con coma, &amp;, «feat.» o «y».</p>
+          <div class="chips-art" id="chips-art" aria-live="polite"></div>
+          <p class="error" data-error="artista" role="alert"></p></div>
+        <div class="campo"><label for="f-genero">Género</label>
+          <select id="f-genero" name="genero">${S.generos.map(g => `<option>${esc(g)}</option>`).join("")}</select>
+          <p class="error" data-error="genero" role="alert"></p></div>
+        <div class="campo"><label for="f-duracion">Duración</label>
+          <input id="f-duracion" name="duracion" placeholder="3:45" inputmode="numeric" maxlength="8" required>
+          <p class="error" data-error="duracion" role="alert"></p></div>
+        <div class="campo"><label for="f-portada">Portada (opcional)</label>
+          <div class="portada-sel"><img id="vista-portada" alt="Vista previa de la portada" hidden>
+            <input id="f-portada" name="portada" type="file" accept="image/jpeg,image/png,image/webp"></div>
+          <p class="ayuda">jpg, png o webp, hasta ${L.portada_mb} MB.</p>
+          <p class="error" data-error="portada" role="alert"></p></div>
+        <div class="campo"><label for="f-audio">Audio (opcional)</label>
+          <input id="f-audio" name="audio" type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/mp4,.mp3,.ogg,.wav,.m4a">
+          <p class="ayuda">mp3, ogg, wav o m4a, hasta ${L.audio_mb} MB.</p>
+          <p class="error" data-error="audio" role="alert"></p></div>
+        <p class="ayuda ancho" id="nota-archivos" hidden>Si no eliges archivos nuevos, se conservan la portada y el audio actuales.</p>
+        <div class="acciones-form ancho"><button class="btn" id="guardar-form">Guardar canción</button><button type="button" class="btn sec" id="cancelar-form">Cancelar</button></div>
       </form>
     </details>
-    <input type="file" id="archivo-audio" accept="audio/*,image/*" hidden>
+    <input type="file" id="archivo-audio" accept="audio/mpeg,audio/ogg,audio/wav,audio/mp4,.mp3,.ogg,.wav,.m4a" hidden>
+    <input type="file" id="archivo-imagen" accept="image/jpeg,image/png,image/webp" hidden>
     <p class="dato" id="metodo"></p>
     <div class="lista" id="lista-bib"></div>`;
+
   let espera;
   ["#q", "#campo", "#orden"].forEach(s => $(s).addEventListener("input", () => { clearTimeout(espera); espera = setTimeout(buscar, 160); }));
-  $("#form-nueva").addEventListener("submit", async e => {
+
+  /* Validación mientras escribes: el servidor decide qué es válido */
+  ["f-titulo", "f-artista", "f-genero", "f-duracion"].forEach(id => {
+    $("#" + id).addEventListener("input", e => { tocados.add(e.target.name); validarEnVivo(); });
+  });
+  /* Archivos: se revisan al elegirlos, antes de enviar nada */
+  [["#f-portada", "portada"], ["#f-audio", "audio"]].forEach(([sel, tipo]) => {
+    $(sel).addEventListener("change", e => {
+      const f = e.target.files[0];
+      const mensaje = f ? revisarArchivo(f, tipo) : "";
+      mostrarError(tipo, mensaje);
+      if (mensaje) e.target.value = "";
+      if (tipo === "portada") {
+        const vista = $("#vista-portada");
+        if (f && !mensaje) { vista.src = URL.createObjectURL(f); vista.hidden = false; } else { vista.removeAttribute("src"); vista.hidden = true; }
+        /* Si el navegador no puede abrirla como imagen, el archivo está dañado o no es una imagen */
+        vista.onerror = () => {
+          if (!vista.getAttribute("src")) return;
+          vista.removeAttribute("src"); vista.hidden = true; e.target.value = "";
+          mostrarError("portada", "No se pudo leer esta imagen. Prueba con otra.");
+        };
+      }
+    });
+  });
+  $("#cancelar-form").addEventListener("click", cerrarForm);
+  $("#panel-form").addEventListener("toggle", () => { if (!$("#panel-form").open && editando !== null) cerrarForm(); });
+
+  $("#form-cancion").addEventListener("submit", async e => {
     e.preventDefault();
-    const formulario = new FormData(e.target);
-    const archivo = formulario.get("audio");
-    formulario.delete("audio");
+    ["titulo", "artista", "genero", "duracion"].forEach(c => tocados.add(c));
+    const revision = await validarEnVivo({ todos: true });
+    const archivos = { portada: $("#f-portada").files[0], audio: $("#f-audio").files[0] };
+    let hayError = !revision.ok;
+    for (const [tipo, f] of Object.entries(archivos)) {
+      const mensaje = f ? revisarArchivo(f, tipo) : "";
+      mostrarError(tipo, mensaje);
+      if (mensaje) hayError = true;
+    }
+    if (hayError) { aviso("Revisa los campos marcados."); return; }
+
+    const esEdicion = editando !== null;
+    const boton = $("#guardar-form");
+    boton.disabled = true;
     try {
-      const nueva = await api("/api/canciones", "POST", Object.fromEntries(formulario));
-      if (archivo && archivo.name) await subirArchivo(nueva.id, archivo);
-      e.target.reset(); aviso("Canción guardada"); recargar();
-    } catch (_) { }
+      const c = await api(esEdicion ? `/api/canciones/${editando}` : "/api/canciones", esEdicion ? "PUT" : "POST", datosForm());
+      const fallidos = [];
+      for (const [tipo, f] of Object.entries(archivos)) {
+        if (f) { try { await subirArchivo(c.id, f, tipo); } catch (_) { fallidos.push(tipo); } }
+      }
+      cerrarForm();
+      aviso(fallidos.length ? `Canción guardada, pero no se pudo subir: ${fallidos.join(" y ")}.` : esEdicion ? "Cambios guardados" : "Canción guardada");
+      await recargar();
+    } catch (err) {
+      if (err.campos) Object.entries(err.campos).forEach(([campo, mensaje]) => mostrarError(campo, mensaje));
+    } finally { boton.disabled = false; }
   });
 }
 function pintarBiblioteca() {
   const n = R.length;
   $("#metodo").textContent = `${n} ${n === 1 ? "canción" : "canciones"}, búsqueda con ${metodo}`;
   const sue = S ? S.playlist.actual : null;
+  const puntos = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
   $("#lista-bib").innerHTML = n ? R.map(c => `
     <div class="fila ${c.id === sue ? "suena" : ""}">
       ${portada(c)}
       <div><div class="t">${esc(c.titulo)}</div><div class="a">${esc(c.artista)}, ${esc(c.genero)}${c.audio ? "" : ' <span class="salto sin">sin audio</span>'}</div></div>
       <div class="acc"><span class="dur">${fmt(c.duracion)}</span>
-        ${ic("nota", "adjuntar", c.id, "Adjuntar audio (mp3) o portada (imagen)")}
         ${ic("play", "reproducir", c.id, "Reproducir")}
-        ${ic("cont", "continuacion", c.id, "Reproducir a continuación")}
         ${ic("mas", "agregar", c.id, "Añadir al final de la cola")}
-        ${ic("borrar", "borrar", c.id, "Eliminar de la biblioteca")}
+        <details class="menu"><summary class="ic" title="Más acciones" aria-label="Más acciones">${puntos}</summary>
+          <div class="menu-lista">
+            <button data-acc="continuacion" data-id="${c.id}">Reproducir a continuación</button>
+            <button data-acc="editar" data-id="${c.id}">Editar datos</button>
+            <button data-acc="portada" data-id="${c.id}">${c.portada ? "Cambiar portada" : "Añadir portada"}</button>
+            <button data-acc="audio" data-id="${c.id}">${c.audio ? "Cambiar audio" : "Añadir audio"}</button>
+            <button data-acc="borrar" data-id="${c.id}" class="peligro">Eliminar</button>
+          </div></details>
       </div>
     </div>`).join("") : `<div class="vacio">No encontramos canciones con ese texto. Prueba con otro título o artista.</div>`;
 }
 
 /* ---------- Mapa de artistas ---------- */
 function generoDe(artista) {
-  const c = S.canciones.find(x => x.artista === artista);
+  const c = S.canciones.find(x => (x.artistas || [x.artista]).includes(artista));
   return c ? c.genero : "Otro";
 }
 function pintarMapa() {
   const rec = S.recomendaciones;
   const artistas = Object.keys(S.grafo).sort((a, b) => a.localeCompare(b, "es"));
   const opciones = sel => artistas.map(a => `<option ${a === sel ? "selected" : ""}>${esc(a)}</option>`).join("");
-  const a = $("#cam-a") ? $("#cam-a").value : rec.artista || artistas[0];
+  const a = $("#cam-a") ? $("#cam-a").value : (rec.artistas && rec.artistas[0]) || artistas[0];
   const b = $("#cam-b") ? $("#cam-b").value : (artistas.find(x => x !== a && !(S.grafo[a] || {})[x]) || artistas[0]);
   const generos = [...new Set(artistas.map(generoDe))];
+  const aislados = artistas.filter(x => !Object.keys(S.grafo[x]).length);
+  const ca = $("#con-a") ? $("#con-a").value : (aislados[0] || artistas[0]);
+  const cb = $("#con-b") ? $("#con-b").value : (artistas.find(x => x !== ca && !(S.grafo[ca] || {})[x]) || artistas[0]);
+  const cp = $("#con-peso") ? $("#con-peso").value : 6;
   $("#mapa").innerHTML = `
     <h1 class="titulo-pag">Mapa de artistas</h1>
     <p class="sub">Cada línea une a dos artistas que suenan parecido; mientras más gruesa, más afinidad. De aquí salen tus recomendaciones.</p>
     <div class="mapa-grid">
-      <div><div class="lienzo">${svgGrafo(rec.artista)}</div>
+      <div><div class="lienzo">${svgGrafo(rec.artistas)}</div>
         <div class="leyenda">${generos.map(g => `<span><i style="${estiloG(g)}"></i>${esc(g)}</span>`).join("")}</div></div>
       <div>
         <h2>¿Cómo se conectan dos artistas?</h2>
@@ -271,6 +449,14 @@ function pintarMapa() {
         <div class="camino-res" id="res-camino">${camino ? (camino.length
           ? camino.map(x => `<span class="paso">${esc(x)}</span>`).join(" → ") + `<span class="salto">${camino.length - 1} ${camino.length - 1 === 1 ? "salto" : "saltos"}</span>`
           : '<span class="suave">Estos artistas no están conectados todavía.</span>') : ""}</div>
+
+        <h2 class="sep">Conectar dos artistas</h2>
+        <p class="ayuda">Una conexión dice que dos artistas suenan parecido. Así aparecen en las recomendaciones.</p>
+        ${aislados.length ? `<p class="ayuda">Sin conexiones todavía: ${aislados.map(esc).join(", ")}.</p>` : ""}
+        <div class="herr"><select id="con-a" aria-label="Primer artista">${opciones(ca)}</select><select id="con-b" aria-label="Segundo artista">${opciones(cb)}</select></div>
+        <label class="peso" for="con-peso">Afinidad: <output id="con-valor">${cp}</output> de 10
+          <input type="range" id="con-peso" min="1" max="10" value="${cp}" oninput="document.getElementById('con-valor').textContent = this.value"></label>
+        <button class="btn" data-acc="conectar">Conectar</button>
       </div>
     </div>`;
 }
@@ -286,7 +472,7 @@ function ordenCircular() {
   }
   return orden;
 }
-function svgGrafo(actualArtista) {
+function svgGrafo(actualesA = []) {
   const nombres = ordenCircular(), n = nombres.length, cx = 320, cy = 250, r = 185;
   const pos = {};
   nombres.forEach((nom, i) => {
@@ -305,9 +491,9 @@ function svgGrafo(actualArtista) {
   const hayCamino = enCamino.size > 0;
   const nodos = nombres.map(nom => {
     const p = pos[nom], dx = Math.cos(p.ang), lado = Math.abs(dx) < .2 ? "middle" : dx > 0 ? "start" : "end";
-    const clase = nom === actualArtista ? "actual" : enCamino.has(nom) ? "camino" : hayCamino ? "atenuado" : "";
+    const clase = actualesA.includes(nom) ? "actual" : enCamino.has(nom) ? "camino" : hayCamino ? "atenuado" : "";
     const [bg] = colorGenero(generoDe(nom));
-    return `<g class="nodo-g ${clase}"><circle cx="${p.x}" cy="${p.y}" r="${nom === actualArtista ? 13 : 10}" fill="${bg}"/>
+    return `<g class="nodo-g ${clase}"><circle cx="${p.x}" cy="${p.y}" r="${actualesA.includes(nom) ? 13 : 10}" fill="${bg}"/>
       <text x="${p.x + dx * 19}" y="${p.y + Math.sin(p.ang) * 19 + 4}" text-anchor="${lado}" font-size="12.5">${esc(nom)}</text></g>`;
   }).join("");
   return `<svg viewBox="0 0 640 500" width="100%" role="img" aria-label="Mapa de artistas relacionados">${lineas}${nodos}</svg>`;
@@ -425,15 +611,13 @@ const ACCIONES = {
     await api("/api/reproducir", "POST", { id }); sonando = true; pos = 0;
     if (idAudio === id) audio.currentTime = 0;           // misma canción: empieza de nuevo
   },
-  adjuntar: id => new Promise(resolver => {
-    const entrada = $("#archivo-audio");
-    entrada.onchange = async () => {
-      const f = entrada.files[0]; entrada.value = "";
-      if (f) { try { aviso(await subirArchivo(id, f)); } catch (_) { } }
-      resolver();
-    };
-    entrada.click();
-  }),
+  portada: id => elegirArchivo("#archivo-imagen", id, "portada"),
+  audio: id => elegirArchivo("#archivo-audio", id, "audio"),
+  editar: id => abrirForm(porId(id)),
+  conectar: async () => {
+    await api("/api/grafo/conectar", "POST", { a: $("#con-a").value, b: $("#con-b").value, peso: Number($("#con-peso").value) });
+    camino = null; aviso("Artistas conectados");
+  },
   agregar: async id => { await api("/api/playlist/agregar", "POST", { id }); aviso("Añadida a tu cola"); },
   continuacion: async id => { await api("/api/playlist/continuacion", "POST", { id }); aviso("Sonará a continuación"); },
   borrar: async id => { if (confirm("¿Eliminar esta canción de la biblioteca?")) await api(`/api/canciones/${id}`, "DELETE"); },
@@ -462,8 +646,11 @@ document.addEventListener("click", async e => {
     if (hayAudio(c) && idAudio === c.id) audio.currentTime = pos;
     return pintarProgreso();
   }
+  const menuActual = e.target.closest("details.menu");
+  $$("details.menu[open]").forEach(d => { if (d !== menuActual) d.open = false; });
   const b = e.target.closest("[data-acc]");
   if (!b) return;
+  if (menuActual) menuActual.open = false;
   if (b.dataset.acc === "ir") return irA(b.dataset.tab);
   const id = b.dataset.id != null ? Number(b.dataset.id) : undefined;
   try { await ACCIONES[b.dataset.acc](id); await recargar(); } catch (_) { /* el aviso ya se mostró */ }
@@ -511,5 +698,10 @@ if ("mediaSession" in navigator) {
   accion("previoustrack", hacer("anterior"));
 }
 
-armarBiblioteca();
-recargar().then(() => irA("inicio"));
+async function iniciar() {
+  S = await api("/api/estado");
+  armarBiblioteca();
+  await recargar();
+  irA("inicio");
+}
+iniciar();

@@ -1,7 +1,7 @@
 """Reproductor de música — servidor Flask.
 
 Une los módulos (todos son funciones sobre listas y diccionarios, sin clases):
-    biblioteca  -> LISTA de canciones
+    biblioteca  -> LISTA de canciones (y toda la validación)
     playlist    -> LISTA DOBLEMENTE ENLAZADA (cola de reproducción)
     indice      -> ÁRBOL BINARIO DE BÚSQUEDA (catálogo por título)
     grafo       -> GRAFO de artistas relacionados
@@ -9,38 +9,101 @@ Une los módulos (todos son funciones sobre listas y diccionarios, sin clases):
     almacenamiento -> guardar/cargar JSON
 
 Ejecutar:  python app.py   y abrir http://127.0.0.1:5000  (el reproductor está en /app)
-El audio real sale de la carpeta musica/. Las canciones sin archivo se reproducen en modo
-simulado (el tiempo avanza según la duración).
+El audio real sale de la carpeta musica/ y las portadas de portadas/.
+Las canciones sin audio se reproducen en modo simulado.
 """
 import os
+import threading
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, g, jsonify, render_template, request, send_from_directory
 
 from modulos import almacenamiento, biblioteca, grafo, historial, indice, playlist
 
 app = Flask(__name__)
 
-# Archivos de cada canción. Se reconocen por el nombre ("Título.mp3", "Artista - Título.mp3"
-# o "<id>.mp3") y también se pueden adjuntar desde la biblioteca.
+# ---------------------------------------------------------------- límites y carpetas
+MB = 1024 * 1024
+LIMITE_AUDIO = 30 * MB
+LIMITE_PORTADA = 5 * MB
+app.config["MAX_CONTENT_LENGTH"] = LIMITE_AUDIO + MB      # tope para cualquier petición
+MAX_TEXTO_BUSQUEDA = 100
+MAX_PLAYLIST = 500
+
+# Archivos de cada canción. Se reconocen por el nombre ("<id>.mp3", "Título.mp3" o
+# "Artista - Título.mp3") y también se pueden adjuntar desde la biblioteca.
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 CARPETA_AUDIO = os.path.join(RAIZ, "musica")
 CARPETA_PORTADAS = os.path.join(RAIZ, "portadas")
 EXT_AUDIO = (".mp3", ".ogg", ".wav", ".m4a")
 EXT_IMAGEN = (".jpg", ".jpeg", ".png", ".webp")
 
+# Todo el estado del programa vive en este diccionario (no hay objetos propios).
+estado = {}
+
+# Waitress atiende varias peticiones a la vez: este cerrojo hace que solo una modifique
+# los datos al mismo tiempo (así no se corrompen las listas ni los JSON).
+CERROJO = threading.RLock()
+
+
+@app.before_request
+def tomar_cerrojo():
+    if request.method != "GET":
+        CERROJO.acquire()
+        g.con_cerrojo = True
+
+
+@app.teardown_request
+def soltar_cerrojo(_):
+    if g.pop("con_cerrojo", False):
+        CERROJO.release()
+
+
+@app.after_request
+def cabeceras_seguras(respuesta):
+    respuesta.headers["X-Content-Type-Options"] = "nosniff"
+    respuesta.headers["Referrer-Policy"] = "same-origin"
+    return respuesta
+
+
+# ---------------------------------------------------------------- utilidades de validación
+def error(mensaje, codigo=400, campos=None):
+    cuerpo_error = {"error": mensaje}
+    if campos:
+        cuerpo_error["campos"] = campos
+    return jsonify(cuerpo_error), codigo
+
+
+def cuerpo():
+    """El JSON de la petición, siempre como diccionario (si viene otra cosa, uno vacío)."""
+    datos = request.get_json(silent=True)
+    return datos if isinstance(datos, dict) else {}
+
+
+def entero(valor):
+    """El valor si es un número entero de verdad (los booleanos y textos no cuentan)."""
+    return valor if isinstance(valor, int) and not isinstance(valor, bool) else None
+
+
+def cancion_o_404(id_cancion):
+    return biblioteca.buscar_por_id(estado["canciones"], id_cancion)
+
 
 def buscar_archivo(carpeta, extensiones, cancion):
-    """Nombre del archivo de esa carpeta que corresponde a la canción, o None."""
+    """Archivo de esa carpeta que corresponde a la canción, o None. El que se llama <id> manda."""
     if not os.path.isdir(carpeta):
         return None
     claves = {biblioteca.normalizar(cancion["titulo"]),
-              biblioteca.normalizar(f'{cancion["artista"]} - {cancion["titulo"]}'),
-              str(cancion["id"])}
+              biblioteca.normalizar(f'{cancion["artista"]} - {cancion["titulo"]}')}
+    por_nombre = None
     for nombre in sorted(os.listdir(carpeta)):
         base, extension = os.path.splitext(nombre)
-        if extension.lower() in extensiones and biblioteca.normalizar(base) in claves:
+        if extension.lower() not in extensiones:
+            continue
+        if base == str(cancion["id"]):
             return nombre
-    return None
+        if por_nombre is None and biblioteca.normalizar(base) in claves:
+            por_nombre = nombre
+    return por_nombre
 
 
 def con_archivos(cancion):
@@ -50,32 +113,65 @@ def con_archivos(cancion):
             "portada": buscar_archivo(CARPETA_PORTADAS, EXT_IMAGEN, cancion) is not None}
 
 
-def guardar_archivo(carpeta, extensiones, id_cancion):
-    """Guarda el archivo recibido como <id>.<ext>, reemplazando el anterior. Devuelve (ok, mensaje)."""
+def firma_valida(extension, cabecera):
+    """Comprueba que el contenido del archivo sea del tipo que dice su extensión."""
+    if extension == ".mp3":
+        return cabecera[:3] == b"ID3" or (len(cabecera) > 1 and cabecera[0] == 0xFF and cabecera[1] & 0xE0 == 0xE0)
+    if extension == ".ogg":
+        return cabecera[:4] == b"OggS"
+    if extension == ".wav":
+        return cabecera[:4] == b"RIFF" and cabecera[8:12] == b"WAVE"
+    if extension == ".m4a":
+        return cabecera[4:8] == b"ftyp"
+    if extension in (".jpg", ".jpeg"):
+        return cabecera[:3] == b"\xff\xd8\xff"
+    if extension == ".png":
+        return cabecera[:8] == b"\x89PNG\r\n\x1a\n"
+    if extension == ".webp":
+        return cabecera[:4] == b"RIFF" and cabecera[8:12] == b"WEBP"
+    return False
+
+
+def guardar_archivo(carpeta, extensiones, limite, id_cancion):
+    """Valida y guarda el archivo recibido como <id>.<ext>. Devuelve (ok, mensaje)."""
     archivo = request.files.get("archivo")
     if archivo is None or not archivo.filename:
-        return False, "No se recibió ningún archivo"
+        return False, "No se recibió ningún archivo."
     extension = os.path.splitext(archivo.filename)[1].lower()
     if extension not in extensiones:
-        return False, "Formato no admitido. Usa " + ", ".join(e[1:] for e in extensiones)
+        return False, "Formato no admitido. Usa " + ", ".join(e[1:] for e in extensiones) + "."
+    archivo.stream.seek(0, os.SEEK_END)
+    tamano = archivo.stream.tell()
+    archivo.stream.seek(0)
+    if tamano == 0:
+        return False, "El archivo está vacío."
+    if tamano > limite:
+        return False, f"El archivo pesa demasiado (máximo {limite // MB} MB)."
+    if not firma_valida(extension, archivo.stream.read(16)):
+        return False, f"El contenido no es un archivo {extension[1:]} válido."
+    archivo.stream.seek(0)
+
     os.makedirs(carpeta, exist_ok=True)
-    for nombre in os.listdir(carpeta):
-        if os.path.splitext(nombre)[0] == str(id_cancion):
+    temporal = os.path.join(carpeta, f".subida-{id_cancion}.tmp")
+    archivo.save(temporal)                                   # primero a un temporal
+    for nombre in os.listdir(carpeta):                       # luego reemplaza el anterior
+        if os.path.splitext(nombre)[0] == str(id_cancion) and nombre != os.path.basename(temporal):
             os.remove(os.path.join(carpeta, nombre))
-    archivo.save(os.path.join(carpeta, f"{id_cancion}{extension}"))
+    os.replace(temporal, os.path.join(carpeta, f"{id_cancion}{extension}"))
     return True, ""
-
-
-# Todo el estado del programa vive en este diccionario (no hay objetos propios).
-estado = {}
 
 
 # ---------------------------------------------------------------- carga y guardado
 def cargar_estado():
     canciones = almacenamiento.cargar("canciones.json", [])
+    if not isinstance(canciones, list):
+        canciones = []
     mapa = almacenamiento.cargar("grafo.json", {})
     datos_lista = almacenamiento.cargar("playlist.json", {"ids": [], "actual": None, "circular": False})
     pila = almacenamiento.cargar("historial.json", [])
+
+    for aviso in biblioteca.reparar(canciones):            # corrige lo que se puede y avisa en la consola
+        print("[Ritmo] Aviso:", aviso)
 
     validos = {c["id"] for c in canciones}
     ids = [i for i in datos_lista["ids"] if i in validos]
@@ -88,6 +184,7 @@ def cargar_estado():
     estado["lista"] = playlist.desde_lista(ids, actual)    # igual: la cadena se reconstruye desde ids
     estado["circular"] = bool(datos_lista["circular"])
     estado["pila"] = [i for i in pila if i in validos]
+    guardar_todo()
 
 
 def guardar_todo():
@@ -99,10 +196,6 @@ def guardar_todo():
         "circular": estado["circular"],
     })
     almacenamiento.guardar("historial.json", estado["pila"])
-
-
-def error(mensaje, codigo=400):
-    return jsonify({"error": mensaje}), codigo
 
 
 # ---------------------------------------------------------------- acciones de reproducción
@@ -124,19 +217,26 @@ def arbol_a_dict(nodo):
 
 
 def recomendaciones():
-    """Canciones de artistas cercanos (en el grafo) al artista de la canción que suena."""
+    """Canciones de artistas cercanos (en el grafo) a los artistas de la canción que suena."""
     id_actual = playlist.id_actual(estado["lista"])
     cancion = biblioteca.buscar_por_id(estado["canciones"], id_actual) if id_actual else None
     if cancion is None:
-        return {"artista": None, "canciones": []}
+        return {"artista": None, "artistas": [], "canciones": []}
+    artistas = biblioteca.artistas_de(cancion)
     en_playlist = set(playlist.a_lista(estado["lista"]))
     salida = []
-    for rel in grafo.relacionados(estado["mapa"], cancion["artista"], 2):
+    for rel in grafo.relacionados_de_varios(estado["mapa"], artistas, 2):
         for c in estado["canciones"]:
-            if c["artista"] == rel["artista"]:
-                salida.append({**c, "distancia": rel["distancia"], "afinidad": rel["afinidad"],
+            if rel["artista"] in biblioteca.artistas_de(c) and c["id"] != cancion["id"]:
+                salida.append({**con_archivos(c), "distancia": rel["distancia"], "afinidad": rel["afinidad"],
                                "en_playlist": c["id"] in en_playlist})
-    return {"artista": cancion["artista"], "canciones": salida[:12]}
+    vistas, unicas = set(), []                              # una canción con dos artistas cercanos sale una vez
+    for c in salida:
+        if c["id"] not in vistas:
+            vistas.add(c["id"])
+            unicas.append(c)
+    nombres = artistas[0] if len(artistas) == 1 else ", ".join(artistas[:-1]) + " y " + artistas[-1]
+    return {"artista": nombres, "artistas": artistas, "canciones": unicas[:12]}
 
 
 def construir_respuesta():
@@ -144,6 +244,12 @@ def construir_respuesta():
     mapa = estado["mapa"]
     return {
         "canciones": [con_archivos(c) for c in estado["canciones"]],
+        "generos": biblioteca.GENEROS,
+        "limites": {
+            "titulo": biblioteca.LIMITE_TITULO, "artista": biblioteca.LIMITE_ARTISTA,
+            "max_artistas": biblioteca.MAX_ARTISTAS, "audio_mb": LIMITE_AUDIO // MB,
+            "portada_mb": LIMITE_PORTADA // MB,
+        },
         "playlist": {
             "ids": playlist.a_lista(lista),
             "actual": playlist.id_actual(lista),
@@ -165,7 +271,7 @@ def construir_respuesta():
     }
 
 
-# ---------------------------------------------------------------- rutas
+# ---------------------------------------------------------------- páginas
 @app.get("/")
 def presentacion():
     return render_template("landing.html")
@@ -183,6 +289,17 @@ def no_encontrada(_):
     return render_template("404.html"), 404
 
 
+@app.errorhandler(413)
+def demasiado_grande(_):
+    return error(f"El archivo pesa demasiado (máximo {LIMITE_AUDIO // MB} MB).", 413)
+
+
+@app.errorhandler(405)
+def metodo_no_permitido(_):
+    return error("Método no permitido", 405)
+
+
+# ---------------------------------------------------------------- API de lectura
 @app.get("/api/estado")
 def ver_estado():
     return jsonify(construir_respuesta())
@@ -191,9 +308,13 @@ def ver_estado():
 @app.get("/api/buscar")
 def buscar():
     """Busca y ordena. El título usa el árbol (prefijo); lo demás recorre la lista."""
-    q = request.args.get("q", "").strip()
+    q = biblioteca.limpiar_texto(request.args.get("q", ""))[:MAX_TEXTO_BUSQUEDA]
     campo = request.args.get("campo", "titulo")
     orden = request.args.get("orden", "titulo")
+    if campo not in ("titulo", "artista", "genero"):
+        return error("Campo de búsqueda no válido")
+    if orden not in ("titulo", "artista", "genero", "duracion"):
+        return error("Orden no válido")
     canciones = estado["canciones"]
     metodo = "lista"
 
@@ -206,45 +327,17 @@ def buscar():
             metodo = "árbol (prefijo)"
         else:
             resultado = biblioteca.filtrar(canciones, "titulo", q)
-    elif campo in ("artista", "genero"):
-        resultado = biblioteca.filtrar(canciones, campo, q)
     else:
-        return error("Campo de búsqueda no válido")
+        resultado = biblioteca.filtrar(canciones, campo, q)
 
     if orden == "titulo":
         posicion = {i: n for n, i in enumerate(indice.inorden(estado["arbol"]))}
         resultado.sort(key=lambda c: posicion[c["id"]])
         if metodo == "lista":
             metodo = "árbol (inorden)"
-    elif orden in ("artista", "genero", "duracion"):
+    else:
         resultado = biblioteca.ordenar(resultado, orden)
     return jsonify({"resultados": [con_archivos(c) for c in resultado], "metodo": metodo})
-
-
-@app.post("/api/canciones")
-def crear_cancion():
-    datos = request.get_json(silent=True) or {}
-    titulo = str(datos.get("titulo", "")).strip()
-    artista = str(datos.get("artista", "")).strip()
-    genero = str(datos.get("genero", "")).strip() or "Otro"
-    duracion = biblioteca.parsear_duracion(str(datos.get("duracion", "")))
-    if not titulo or not artista:
-        return error("Falta el título o el artista")
-    if duracion is None:
-        return error("Duración no válida (usa 3:45 o segundos)")
-    cancion = biblioteca.agregar(estado["canciones"], titulo, artista, genero, duracion)
-    estado["arbol"] = indice.insertar(estado["arbol"], cancion["titulo"], cancion["id"])
-    grafo.agregar_artista(estado["mapa"], cancion["artista"])
-    guardar_todo()
-    return jsonify(cancion)
-
-
-def servir(carpeta, extensiones, id_cancion):
-    cancion = biblioteca.buscar_por_id(estado["canciones"], id_cancion)
-    nombre = buscar_archivo(carpeta, extensiones, cancion) if cancion else None
-    if nombre is None:
-        return error("No hay archivo para esta canción", 404)
-    return send_from_directory(carpeta, nombre, conditional=True)   # conditional permite adelantar la pista
 
 
 @app.get("/audio/<int:id_cancion>")
@@ -257,40 +350,123 @@ def servir_portada(id_cancion):
     return servir(CARPETA_PORTADAS, EXT_IMAGEN, id_cancion)
 
 
-def subir(carpeta, extensiones, id_cancion):
-    if biblioteca.buscar_por_id(estado["canciones"], id_cancion) is None:
+def servir(carpeta, extensiones, id_cancion):
+    cancion = cancion_o_404(id_cancion)
+    nombre = buscar_archivo(carpeta, extensiones, cancion) if cancion else None
+    if nombre is None:
+        return error("No hay archivo para esta canción", 404)
+    return send_from_directory(carpeta, nombre, conditional=True)   # conditional permite adelantar la pista
+
+
+@app.get("/api/camino")
+def ruta_camino():
+    origen, destino = request.args.get("a", ""), request.args.get("b", "")
+    if origen not in estado["mapa"] or destino not in estado["mapa"]:
+        return error("Elige dos artistas de la lista")
+    return jsonify({"camino": grafo.camino(estado["mapa"], origen, destino)})
+
+
+# ---------------------------------------------------------------- API de canciones
+@app.post("/api/validar")
+def validar():
+    """Valida los datos de una canción sin guardar nada (el formulario lo usa mientras escribes)."""
+    datos = cuerpo()
+    excluir = entero(datos.get("excluir_id"))
+    errores, limpio = biblioteca.validar_cancion(
+        estado["canciones"], datos.get("titulo", ""), datos.get("artista", ""),
+        datos.get("genero", ""), datos.get("duracion", ""), excluir)
+    return jsonify({"ok": not errores, "errores": errores, "artistas": limpio["artistas"]})
+
+
+@app.post("/api/canciones")
+def crear_cancion():
+    datos = cuerpo()
+    if len(estado["canciones"]) >= biblioteca.MAX_CANCIONES:
+        return error(f"La biblioteca está llena (máximo {biblioteca.MAX_CANCIONES} canciones).")
+    errores, limpio = biblioteca.validar_cancion(
+        estado["canciones"], datos.get("titulo", ""), datos.get("artista", ""),
+        datos.get("genero", ""), datos.get("duracion", ""))
+    if errores:
+        return error("Revisa los campos marcados.", 400, errores)
+    cancion = biblioteca.agregar(estado["canciones"], limpio)
+    estado["arbol"] = indice.insertar(estado["arbol"], cancion["titulo"], cancion["id"])
+    grafo.sincronizar(estado["mapa"], [cancion])          # crea los artistas y conecta a los colaboradores
+    guardar_todo()
+    return jsonify(cancion)
+
+
+@app.put("/api/canciones/<int:id_cancion>")
+def editar_cancion(id_cancion):
+    cancion = cancion_o_404(id_cancion)
+    if cancion is None:
         return error("No existe esa canción", 404)
-    ok, mensaje = guardar_archivo(carpeta, extensiones, id_cancion)
+    datos = cuerpo()
+    errores, limpio = biblioteca.validar_cancion(
+        estado["canciones"], datos.get("titulo", ""), datos.get("artista", ""),
+        datos.get("genero", ""), datos.get("duracion", ""), excluir_id=id_cancion)
+    if errores:
+        return error("Revisa los campos marcados.", 400, errores)
+    estado["arbol"] = indice.eliminar(estado["arbol"], cancion["titulo"], id_cancion)
+    biblioteca.actualizar(cancion, limpio)
+    estado["arbol"] = indice.insertar(estado["arbol"], cancion["titulo"], id_cancion)
+    grafo.sincronizar(estado["mapa"], [cancion])
+    grafo.limpiar_sin_canciones(estado["mapa"], estado["canciones"])   # por si cambió de artista
+    guardar_todo()
+    return jsonify(cancion)
+
+
+@app.delete("/api/canciones/<int:id_cancion>")
+def borrar_cancion(id_cancion):
+    cancion = cancion_o_404(id_cancion)
+    if cancion is None:
+        return error("No existe esa canción", 404)
+    biblioteca.eliminar(estado["canciones"], id_cancion)
+    estado["arbol"] = indice.eliminar(estado["arbol"], cancion["titulo"], id_cancion)
+    antes = playlist.id_actual(estado["lista"])
+    playlist.eliminar(estado["lista"], id_cancion)
+    despues = playlist.id_actual(estado["lista"])
+    historial.quitar(estado["pila"], id_cancion)
+    if despues is not None and despues != antes:
+        historial.apilar(estado["pila"], despues)
+    grafo.limpiar_sin_canciones(estado["mapa"], estado["canciones"])
+    borrar_archivos_subidos(id_cancion)
+    guardar_todo()
+    return jsonify({"ok": True})
+
+
+def borrar_archivos_subidos(id_cancion):
+    """Quita el audio y la portada subidos para esa canción (los que se llaman <id>.ext).
+    Si no, el id se reutiliza y la canción nueva heredaría los archivos de la borrada.
+    Los archivos con nombre propio (Título.mp3) no se tocan."""
+    for carpeta in (CARPETA_AUDIO, CARPETA_PORTADAS):
+        if os.path.isdir(carpeta):
+            for nombre in os.listdir(carpeta):
+                if os.path.splitext(nombre)[0] == str(id_cancion):
+                    os.remove(os.path.join(carpeta, nombre))
+
+
+def subir(carpeta, extensiones, limite, id_cancion):
+    if cancion_o_404(id_cancion) is None:
+        return error("No existe esa canción", 404)
+    ok, mensaje = guardar_archivo(carpeta, extensiones, limite, id_cancion)
     return jsonify({"ok": True}) if ok else error(mensaje)
 
 
 @app.post("/api/canciones/<int:id_cancion>/audio")
 def subir_audio(id_cancion):
-    return subir(CARPETA_AUDIO, EXT_AUDIO, id_cancion)
+    return subir(CARPETA_AUDIO, EXT_AUDIO, LIMITE_AUDIO, id_cancion)
 
 
 @app.post("/api/canciones/<int:id_cancion>/portada")
 def subir_portada(id_cancion):
-    return subir(CARPETA_PORTADAS, EXT_IMAGEN, id_cancion)
+    return subir(CARPETA_PORTADAS, EXT_IMAGEN, LIMITE_PORTADA, id_cancion)
 
 
-@app.delete("/api/canciones/<int:id_cancion>")
-def borrar_cancion(id_cancion):
-    cancion = biblioteca.buscar_por_id(estado["canciones"], id_cancion)
-    if cancion is None:
-        return error("No existe esa canción", 404)
-    biblioteca.eliminar(estado["canciones"], id_cancion)
-    estado["arbol"] = indice.eliminar(estado["arbol"], cancion["titulo"], id_cancion)
-    playlist.eliminar(estado["lista"], id_cancion)
-    historial.quitar(estado["pila"], id_cancion)
-    guardar_todo()
-    return jsonify({"ok": True})
-
-
+# ---------------------------------------------------------------- API de reproducción
 @app.post("/api/reproducir")
 def ruta_reproducir():
-    id_cancion = (request.get_json(silent=True) or {}).get("id")
-    if biblioteca.buscar_por_id(estado["canciones"], id_cancion) is None:
+    id_cancion = entero(cuerpo().get("id"))
+    if cancion_o_404(id_cancion) is None:
         return error("No existe esa canción", 404)
     reproducir(id_cancion)
     guardar_todo()
@@ -328,32 +504,34 @@ def ruta_volver():
 
 @app.post("/api/playlist/agregar")
 def playlist_agregar():
-    id_cancion = (request.get_json(silent=True) or {}).get("id")
-    if biblioteca.buscar_por_id(estado["canciones"], id_cancion) is None:
+    id_cancion = entero(cuerpo().get("id"))
+    if cancion_o_404(id_cancion) is None:
         return error("No existe esa canción", 404)
+    if estado["lista"]["tamanio"] >= MAX_PLAYLIST:
+        return error(f"La cola está llena (máximo {MAX_PLAYLIST} canciones).")
     if not playlist.agregar_al_final(estado["lista"], id_cancion):
-        return error("Ya está en la playlist")
+        return error("Ya está en la cola.")
     guardar_todo()
     return jsonify({"ok": True})
 
 
 @app.post("/api/playlist/continuacion")
 def playlist_continuacion():
-    id_cancion = (request.get_json(silent=True) or {}).get("id")
-    if biblioteca.buscar_por_id(estado["canciones"], id_cancion) is None:
+    id_cancion = entero(cuerpo().get("id"))
+    if cancion_o_404(id_cancion) is None:
         return error("No existe esa canción", 404)
     if not playlist.a_continuacion(estado["lista"], id_cancion):
-        return error("Esa ya es la que está sonando")
+        return error("Esa ya es la que está sonando.")
     guardar_todo()
     return jsonify({"ok": True})
 
 
 @app.post("/api/playlist/quitar")
 def playlist_quitar():
-    id_cancion = (request.get_json(silent=True) or {}).get("id")
+    id_cancion = entero(cuerpo().get("id"))
     antes = playlist.id_actual(estado["lista"])
     if not playlist.eliminar(estado["lista"], id_cancion):
-        return error("No está en la playlist", 404)
+        return error("No está en la cola.", 404)
     despues = playlist.id_actual(estado["lista"])
     if despues is not None and despues != antes:      # sonaba esa: pasa a su vecina
         historial.apilar(estado["pila"], despues)
@@ -363,11 +541,13 @@ def playlist_quitar():
 
 @app.post("/api/playlist/mover")
 def playlist_mover():
-    datos = request.get_json(silent=True) or {}
-    id_cancion, sentido = datos.get("id"), datos.get("sentido")
+    datos = cuerpo()
+    id_cancion, sentido = entero(datos.get("id")), datos.get("sentido")
+    if sentido not in ("subir", "bajar"):
+        return error("Sentido no válido")
     ids = playlist.a_lista(estado["lista"])
     if id_cancion not in ids:
-        return error("No está en la playlist", 404)
+        return error("No está en la cola.", 404)
     posicion = ids.index(id_cancion)
     if sentido == "subir" and posicion > 0:
         if posicion == 1:
@@ -396,27 +576,18 @@ def playlist_circular():
 
 @app.post("/api/grafo/conectar")
 def grafo_conectar():
-    datos = request.get_json(silent=True) or {}
+    datos = cuerpo()
     a, b = datos.get("a"), datos.get("b")
-    try:
-        peso = int(datos.get("peso"))
-    except (TypeError, ValueError):
-        return error("El peso debe ser un número del 1 al 10")
+    peso = entero(datos.get("peso"))
     if a not in estado["mapa"] or b not in estado["mapa"]:
         return error("Artista no encontrado")
     if a == b:
         return error("Elige dos artistas distintos")
-    if not 1 <= peso <= 10:
-        return error("El peso debe ser del 1 al 10")
+    if peso is None or not 1 <= peso <= 10:
+        return error("El peso debe ser un número del 1 al 10")
     grafo.conectar(estado["mapa"], a, b, peso)
     guardar_todo()
     return jsonify({"ok": True})
-
-
-@app.get("/api/camino")
-def ruta_camino():
-    ruta = grafo.camino(estado["mapa"], request.args.get("a", ""), request.args.get("b", ""))
-    return jsonify({"camino": ruta})
 
 
 cargar_estado()

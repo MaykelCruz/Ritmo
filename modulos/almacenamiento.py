@@ -20,6 +20,10 @@ def cargar(nombre, por_defecto):
 
 
 def guardar(nombre, datos):
+    """Escribe en un archivo temporal y luego lo cambia por el real, así un corte de luz o un
+    error a mitad de la escritura no deja el JSON a medias."""
     os.makedirs(CARPETA_DATOS, exist_ok=True)
-    with open(ruta(nombre), "w", encoding="utf-8") as archivo:
+    temporal = ruta(nombre) + ".tmp"
+    with open(temporal, "w", encoding="utf-8") as archivo:
         json.dump(datos, archivo, ensure_ascii=False, indent=2)
+    os.replace(temporal, ruta(nombre))
