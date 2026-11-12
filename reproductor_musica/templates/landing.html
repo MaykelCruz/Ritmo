@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ritmo · Tu música latina, siempre a mano</title>
+  <meta name="description" content="Ritmo es un reproductor web con cola editable, búsqueda al instante y un mapa de artistas parecidos. Hecho con Python y Flask.">
+  <meta name="theme-color" content="#f4f6fb">
+  <meta property="og:title" content="Ritmo · Tu música latina, siempre a mano">
+  <meta property="og:description" content="Cola editable, búsqueda al instante y un mapa que te lleva de un artista a otro.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="{{ url_for('static', filename='icono.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='landing.css') }}">
+</head>
+<body>
+  <header class="barra">
+    <div class="contenedor barra-in">
+      <a class="marca" href="/" aria-label="Ritmo, inicio"><span class="logo" aria-hidden="true"></span>Ritmo</a>
+      <nav aria-label="Principal">
+        <a href="#funciones">Funciones</a>
+        <a href="#capturas">Así se ve</a>
+        <a href="#por-dentro">Por dentro</a>
+        <a class="btn chico" href="/app">Abrir Ritmo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero contenedor">
+      <div class="hero-txt">
+        <h1>Tu música latina, siempre a mano.</h1>
+        <p class="lead">Ritmo es un reproductor web con una cola que puedes reordenar, búsqueda que responde mientras escribes y un mapa que te lleva de un artista a otro.</p>
+        <div class="acciones">
+          <a class="btn" href="/app">Abrir Ritmo</a>
+          <a class="btn sec" href="#por-dentro">Ver cómo está hecho</a>
+        </div>
+        <ul class="generos" aria-label="Géneros de la biblioteca de ejemplo">
+          <li style="--g:#2f4bff">Rock</li><li style="--g:#d62f63">Pop</li><li style="--g:#ffb72b">Salsa</li><li style="--g:#0b7f60">Folclor</li><li style="--g:#6b3ff0">Reggaetón</li>
+        </ul>
+      </div>
+      <div class="escena" aria-hidden="true">
+        <div class="disco"><div class="vinilo"><div class="etiqueta-d">R</div></div></div>
+      </div>
+    </section>
+
+    <section id="funciones" class="contenedor funciones">
+      <h2>Lo que puedes hacer</h2>
+      <div class="tres">
+        <article>
+          <h3>Armar una cola a tu manera</h3>
+          <p>Añade canciones, ponlas a continuación de la que suena, súbelas o bájalas, mézclalas o repite la lista completa. Volver a la canción anterior es un solo clic.</p>
+        </article>
+        <article>
+          <h3>Encontrar una canción rápido</h3>
+          <p>Escribe las primeras letras de un título y la lista se reduce al instante. También puedes buscar por artista o género y ordenar por duración.</p>
+        </article>
+        <article>
+          <h3>Descubrir por afinidad</h3>
+          <p>Cada artista está conectado con otros parecidos. Mientras suena uno, Ritmo te sugiere canciones de los más cercanos y te muestra cómo se enlazan dos artistas.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="capturas" class="contenedor capturas">
+      <h2>Así se ve</h2>
+      <div class="marco">
+        <div class="marco-top" aria-hidden="true"><i></i><i></i><i></i></div>
+        <img src="{{ url_for('static', filename='img/inicio.jpg') }}" alt="Pantalla de inicio de Ritmo con el disco de vinilo, la cola de reproducción y recomendaciones" width="1280" height="800" loading="lazy">
+      </div>
+      <div class="marco">
+        <div class="marco-top" aria-hidden="true"><i></i><i></i><i></i></div>
+        <img src="{{ url_for('static', filename='img/mapa.jpg') }}" alt="Mapa de artistas de Ritmo con un camino resaltado entre dos artistas" width="1280" height="800" loading="lazy">
+      </div>
+    </section>
+
+    <section id="por-dentro" class="contenedor dentro">
+      <div class="dentro-intro">
+        <h2>Por dentro</h2>
+        <p>Ritmo está escrito en Python, con funciones y diccionarios. Todo se guarda en archivos JSON. Cada estructura de datos resuelve un problema concreto del reproductor.</p>
+      </div>
+      <dl class="estructuras">
+        <div><dt>Lista</dt><dd>La biblioteca de canciones: altas, bajas, filtros y orden.</dd><code>biblioteca.py</code></div>
+        <div><dt>Lista doblemente enlazada</dt><dd>La cola de reproducción. «A continuación» o mover una canción cambia solo unos enlaces.</dd><code>playlist.py</code></div>
+        <div><dt>Árbol binario de búsqueda</dt><dd>El catálogo por título: búsqueda por prefijo y listado de la A a la Z.</dd><code>indice.py</code></div>
+        <div><dt>Grafo con pesos</dt><dd>Artistas parecidos: recomendaciones y el camino más corto entre dos artistas.</dd><code>grafo.py</code></div>
+        <div><dt>Pila</dt><dd>El historial, para volver a lo último que escuchaste.</dd><code>historial.py</code></div>
+      </dl>
+    </section>
+
+    <section class="cierre">
+      <div class="contenedor cierre-in">
+        <div>
+          <h2>Pon tu música y dale play</h2>
+          <p>Copia tus archivos mp3 a la carpeta <code>musica/</code> o adjúntalos desde la biblioteca, y añade una imagen para que cada canción tenga su portada.</p>
+        </div>
+        <a class="btn claro" href="/app">Abrir Ritmo</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="pie">
+    <div class="contenedor pie-in">
+      <span class="marca"><span class="logo" aria-hidden="true"></span>Ritmo</span>
+    </div>
+  </footer>
+</body>
+</html>

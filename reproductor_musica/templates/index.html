@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ritmo · Música en español</title>
+  <meta name="description" content="Escucha, organiza y descubre música latina con Ritmo.">
+  <meta name="theme-color" content="#f4f6fb">
+  <link rel="icon" href="{{ url_for('static', filename='icono.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="cabecera">
+    <div class="cabecera-in">
+      <a class="marca" href="/" aria-label="Ritmo, inicio"><span class="logo" aria-hidden="true"></span>Ritmo</a>
+      <nav class="tabs" id="tabs" aria-label="Secciones">
+        <button data-tab="inicio" class="activa">Inicio</button>
+        <button data-tab="biblioteca">Biblioteca</button>
+        <button data-tab="mapa">Mapa de artistas</button>
+        <button data-tab="estructuras">Bajo el capó</button>
+        <span class="indicador" id="indicador"></span>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section id="inicio" class="panel activo"></section>
+    <section id="biblioteca" class="panel"></section>
+    <section id="mapa" class="panel"></section>
+    <section id="estructuras" class="panel"></section>
+  </main>
+
+  <footer class="reproductor" id="reproductor"></footer>
+  <div class="aviso" id="aviso" role="status"></div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

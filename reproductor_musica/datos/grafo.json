@@ -1,0 +1,70 @@
+{
+  "Gustavo Cerati": {
+    "Soda Stereo": 10
+  },
+  "Soda Stereo": {
+    "Gustavo Cerati": 10,
+    "Enanitos Verdes": 7,
+    "Caifanes": 6
+  },
+  "Enanitos Verdes": {
+    "Soda Stereo": 7,
+    "Maná": 6
+  },
+  "Caifanes": {
+    "Soda Stereo": 6,
+    "Maná": 8
+  },
+  "Maná": {
+    "Enanitos Verdes": 6,
+    "Caifanes": 8,
+    "Juanes": 6
+  },
+  "Juanes": {
+    "Maná": 6,
+    "Shakira": 7,
+    "Marc Anthony": 3
+  },
+  "Shakira": {
+    "Juanes": 7,
+    "Bad Bunny": 5,
+    "Carlos Vives": 8
+  },
+  "Bad Bunny": {
+    "Shakira": 5,
+    "Daddy Yankee": 8
+  },
+  "Daddy Yankee": {
+    "Bad Bunny": 8,
+    "Don Omar": 9
+  },
+  "Don Omar": {
+    "Daddy Yankee": 9
+  },
+  "Marc Anthony": {
+    "Juanes": 3,
+    "Celia Cruz": 8,
+    "Luis Enrique": 7
+  },
+  "Celia Cruz": {
+    "Marc Anthony": 8,
+    "Rubén Blades": 7
+  },
+  "Rubén Blades": {
+    "Celia Cruz": 7,
+    "Luis Enrique": 6
+  },
+  "Luis Enrique": {
+    "Rubén Blades": 6,
+    "Marc Anthony": 7,
+    "Carlos Mejía Godoy": 3
+  },
+  "Carlos Mejía Godoy": {
+    "Luis Enrique": 3,
+    "Carlos Vives": 4
+  },
+  "Carlos Vives": {
+    "Carlos Mejía Godoy": 4,
+    "Shakira": 8
+  }
+}
